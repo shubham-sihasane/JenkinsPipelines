@@ -1,0 +1,32 @@
+pipeline {
+    agent any
+
+    stages {
+        stage('Clean Workspace'){
+            steps {
+                cleanWs()
+            }
+        }
+        stage('Build') {
+            steps {
+                sh '''
+                    echo "Building a Laptop..."
+                    mkdir -p build
+                    touch build/computer.txt
+                    echo "Mainboard" >> build/computer.txt
+                    cat 'build/computer.txt'
+                    echo "Display" >> build/computer.txt
+                    cat 'build/computer.txt'
+                    echo "Keyboard" >> build/computer.txt
+                    cat 'build/computer.txt'
+                '''
+            }
+        }
+    }
+    
+    post {
+        success {
+            archiveArtifacts artifacts: 'build/**'
+        }
+    }
+}
