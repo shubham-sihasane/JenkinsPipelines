@@ -1,9 +1,33 @@
-post {
+pipeline {
+    agent any
+    
+    parameters {
+        // string (name:'Git_Branch', defaultValue: 'main', description: 'Git Branch Name')
+        choice (name: 'Branch Name', choices: ['main','dev'], description: 'Select the required branch')
+    }
+
+    stages {
+        stage('Git Checkout') {
+            steps {
+                git branch: "${params.Git_Branch}", credentialsId: 'GitHub-Credentials', url: 'https://github.com/shubham-sihasane/starlink.git'
+            }
+        }
+        stage('Hello') {
+            steps {
+                echo 'Hello World'
+            }
+        }
+    }
+    post {
         success {
             build job: 'Job2'
         }
-
         failure {
             build job: 'Job3'
         }
+    }
 }
+
+
+
+
