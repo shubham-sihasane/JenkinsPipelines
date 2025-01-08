@@ -1,0 +1,47 @@
+pipeline {
+    agent any
+    
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+    }
+
+    stages {
+        stage('Git Checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/shubham-sihasane/NodejS-JEST.git'
+            }
+        }
+        stage('Dependencies') {
+            steps {
+               nodejs('nodejs') {
+                    sh 'npm install'
+                }
+            }
+        }
+        stage('Test') {
+            steps {
+                nodejs('nodejs') {
+                    sh 'npm run test'
+                }
+            }
+        }
+        stage('Sonar') {
+            steps {
+                withSonarQubeEnv('sonar-server') {
+                    sh '''
+                        $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=NodeJsProject -Dsonar.projectKey=NodeJsProject -Dsonar.sources=. -Dsonar.tests=. -Dsonar.test.inclusions=**/*.test.js -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+                        
+                        echo $SCANNER_HOME
+                    '''
+                }
+            }
+        }
+        stage('SonarQuality') {
+            steps {
+                timeout(time: 1, unit: 'HOURS') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+    }
+}
