@@ -36,6 +36,13 @@ pipeline {
                 }
             }
         }
+        stage('SonarQuality') {
+            steps {
+                timeout(time: 1, unit: 'HOURS') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
         stage('Package') {
             steps {
                 sh 'mvn package'
