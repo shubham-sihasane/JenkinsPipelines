@@ -1,0 +1,55 @@
+pipeline {
+    agent any
+    
+    tools {
+        maven 'maven'
+        jdk 'jdk17'
+    }
+    
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+    }
+
+    stages {
+        stage('Git Checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/shubham-sihasane/FullStack-Blogging-App.git'
+            }
+        }
+        stage('Compile') {
+            steps {
+                sh 'mvn compile'
+            }
+        }
+        stage('Test') {
+            steps {
+                sh 'mvn test'
+            }
+        }
+        stage('Sonar') {
+            steps {
+                withSonarQubeEnv('sonar-server') {
+                    sh '''
+                        $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName-blogging -Dsonar.projectKey=blogging -Dsonar.java.binaries=target
+                        echo $SCANNER_HOME
+                    '''
+                }
+            }
+        }
+        stage('Trivy FS Scan') {
+            steps {
+                sh '''
+                    trivy --version
+                    trivy fs --format table -o fs-scan-report.html .
+                '''
+            }
+        }
+        stage('Package Publish') {
+            steps {
+                withMaven(globalMavenSettingsConfig: '', jdk: '', maven: '', mavenSettingsConfig: 'maven-settings', traceability: true) {
+                    sh 'mvn deploy'
+                }
+            }
+        }
+    }
+}
