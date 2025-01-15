@@ -1,0 +1,148 @@
+pipeline {
+    
+    agent any
+    
+    tools {
+        maven 'maven'
+        jdk 'jdk17'
+    }
+    
+    environment {
+        IMAGE_NAME = "sihasaneshubham/bankapp"
+        TAG = "${env.BUILD_NUMBER}"
+        SCANNER_HOME = tool 'sonar-scanner'
+    }
+
+    stages {
+        stage('Git Checkout') {
+            steps {
+                git branch: 'main', credentialsId: 'GitHubCredentials', url: 'https://github.com/shubham-sihasane/Multi-Tier-Java.git'
+            }
+        }
+        stage('Compile') {
+            steps {
+                sh """
+                    mvn compile -DskipTests=true
+                """
+            }
+        }
+        stage('Test') {
+            steps {
+                sh """
+                    mvn test -DskipTests=true
+                """
+            }
+        }
+        stage('Trivy FileScan') {
+            steps {
+                sh """
+                    trivy fs --format table -o filescan.html .
+                """
+            }
+        }
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar-server') {
+                    sh """
+                        $SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectName-bankapp \
+                        -Dsonar.projectKey=bankapp \
+                        -Dsonar.java.binaries=target
+                    """
+                }
+            }
+        }
+        stage('Sonar Quality Gate') {
+            steps {
+                timeout(time: 1, unit: 'HOURS') {
+                    waitForQualityGate abortPipeline: false
+                }   
+            }
+        }
+        stage('Build'){
+            steps {
+                sh """
+                    mvn package -DskipTests=true
+                """
+            }
+        }
+        stage('Publish artifacts') {
+            steps {
+                withMaven(globalMavenSettingsConfig: 'maven-settings', jdk: '', maven: 'maven3', mavenSettingsConfig: '', traceability: true) {
+                    sh "mvn deploy -DskipTests=true"
+                }
+            }
+        }
+        stage('Build Image'){
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'DockerHubCredentials') {
+                        sh """
+                            docker image build -t ${IMAGE_NAME}:${TAG} .
+                        """
+                    }
+                }
+            }
+        }
+        stage('Trivy Image Scan') {
+            steps {
+                sh """
+                    trivy image --format table -o imagescan.html ${IMAGE_NAME}:${TAG}
+                """
+            }
+        }
+        stage('Push Image'){
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'DockerHubCredentials') {
+                        sh """
+                            docker image push ${IMAGE_NAME}:${TAG}
+                        """
+                    }
+                }
+            }
+        }
+        stage('Update K8s Manifest') {
+            steps {
+                sh """
+                    sed -i '58s|image: ${IMAGE_NAME}:.*|image: ${IMAGE_NAME}:${TAG}|' ds.yml
+                """
+            }
+        }
+        stage('Commit & Push') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'GitHubCredentials', passwordVariable: '', usernameVariable: '')]) {
+                    sh """
+                        git config --global user.email "shubhamsihasane101@gmail.com"
+                        git config --global user.name "Shubham Sihasane"
+                        git remote set-url origin https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/shubham-sihasane/Multi-Tier-Java.git
+                        git pull origin main
+                        git add ds.yml
+                        git commit -m "Update image to ${IMAGE_NAME}:${TAG}"
+                        git push origin main
+                    """
+                }
+            }
+        }
+        stage('Kubernetes Deployment') {
+            steps {
+                withKubeConfig(caCertificate: '', clusterName: 'happy-engineers-cluster', contextName: '', credentialsId: 'kubernetes-service-token', namespace: 'webapps', restrictKubeConfigAccess: false, serverUrl: 'https://729DE78F6C7BCC9CC7F3FAC65830F134.gr7.ap-south-1.eks.amazonaws.com') {
+                    sh """
+                        kubectl apply -f ds.yml
+                        sleep 30
+                    """
+                }
+            }
+        }
+        stage('Kubernetes Verify') {
+            steps {
+                withKubeConfig(caCertificate: '', clusterName: 'happy-engineers-cluster', contextName: '', credentialsId: 'kubernetes-service-token', namespace: 'webapps', restrictKubeConfigAccess: false, serverUrl: 'https://729DE78F6C7BCC9CC7F3FAC65830F134.gr7.ap-south-1.eks.amazonaws.com') {
+                    sh """
+                        kubectl get pods -n webapps
+                        kubectl get svc -n webapps
+                    """
+                }
+            }
+        }
+    }
+}
