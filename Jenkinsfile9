@@ -1,0 +1,131 @@
+pipeline {
+    agent any
+    
+    parameters {
+        choice(name: 'DEPLOY_ENV', choices: ['blue', 'green'], description: 'Choose which environment to deploy: Blue or Green')
+        choice(name: 'DOCKER_TAG', choices: ['blue', 'green'], description: 'Choose the Docker image tag for the deployment')
+        booleanParam(name: 'SWITCH_TRAFFIC', defaultValue: false, description: 'Switch traffic between Blue and Green')
+    }
+    
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+        IMAGE_NAME = "sihasaneshubham/blue-green-app"
+        TAG = "${params.DOCKER_TAG}"
+        KUBE_NAMESPACE = 'webapps'
+    }
+
+    stages {
+        stage('Git Checkout') {
+            steps {
+                git branch: 'main', credentialsId: 'GitHubCredentials', url: 'https://github.com/shubham-sihasane/3-Tier-NodeJS-MySql-Docker-EKS.git'
+            }
+        }
+        stage('Trivy FileScan') {
+            steps {
+                sh """
+                    trivy fs --format table -o filescan.html .
+                """
+            }
+        }
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar-server') {
+                    sh """
+                        $SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectKey=NodeMySQL \
+                        -Dsonar.projectName=NodeMySQL \
+                    """
+                }
+            }
+        }
+        stage('Build Image'){
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'DockerHubCredentials') {
+                        sh """
+                            docker image build -t ${IMAGE_NAME}:${TAG} .
+                        """
+                    }
+                }
+            }
+        }
+        stage('Trivy Image Scan') {
+            steps {
+                sh """
+                    trivy image --format table -o imagescan.html ${IMAGE_NAME}:${TAG}
+                """
+            }
+        }
+        stage('Push Image'){
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'DockerHubCredentials') {
+                        sh """
+                            docker image push ${IMAGE_NAME}:${TAG}
+                        """
+                    }
+                }
+            }
+        }
+        stage('Deploy SVC App') {
+            steps {
+                withKubeConfig(caCertificate: '', clusterName: 'happy-engineers-cluster', contextName: '', credentialsId: 'kubernetes-service-token', namespace: 'webapps', restrictKubeConfigAccess: false, serverUrl: 'https://B211930B6A8D46DE0A16BD99BBB7F377.yl4.ap-south-1.eks.amazonaws.com') {
+                    sh """
+                      if ! kubectl get svc app -n ${KUBE_NAMESPACE}; then
+                          kubectl apply -f app-service.yml -n ${KUBE_NAMESPACE}
+                      fi
+                    """
+                }
+            }
+        }
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    def deploymentFile = ""
+                    if (params.DEPLOY_ENV == 'blue') {
+                        deploymentFile = 'app-deployment-blue.yml'
+                    } else {
+                        deploymentFile = 'app-deployment-green.yml'
+                    }
+
+                    withKubeConfig(caCertificate: '', clusterName: 'happy-engineers-cluster', contextName: '', credentialsId: 'kubernetes-service-token', namespace: 'webapps', restrictKubeConfigAccess: false, serverUrl: 'https://B211930B6A8D46DE0A16BD99BBB7F377.yl4.ap-south-1.eks.amazonaws.com') {
+						            sh "kubectl apply -f pv-pvc.yml -n ${KUBE_NAMESPACE}"
+						            sh "kubectl apply -f mysql-ds.yml -n ${KUBE_NAMESPACE}"
+                        sh "kubectl apply -f ${deploymentFile} -n ${KUBE_NAMESPACE}"
+                    }
+                }
+            }
+        }
+        stage('Switch Traffic') {
+          when {
+              expression { return params.SWITCH_TRAFFIC }
+          }
+          steps {
+              script {
+                  def newEnv = params.DEPLOY_ENV
+
+                  // Always switch traffic based on DEPLOY_ENV
+                  withKubeConfig(caCertificate: '', clusterName: 'happy-engineers-cluster', contextName: '', credentialsId: 'kubernetes-service-token', namespace: 'webapps', restrictKubeConfigAccess: false, serverUrl: 'https://B211930B6A8D46DE0A16BD99BBB7F377.yl4.ap-south-1.eks.amazonaws.com') {
+                      sh '''
+                          kubectl patch service app -p "{\\"spec\\": {\\"selector\\": {\\"app\\": \\"app\\", \\"version\\": \\"''' + newEnv + '''\\"}}}" -n ${KUBE_NAMESPACE}
+                      '''
+                  }
+                  echo "Traffic has been switched to the ${newEnv} environment."
+              }
+          }
+        }
+        stage('Verify Deployment') {
+            steps {
+                script {
+                    def verifyEnv = params.DEPLOY_ENV
+                    withKubeConfig(caCertificate: '', clusterName: 'happy-engineers-cluster', contextName: '', credentialsId: 'kubernetes-service-token', namespace: 'webapps', restrictKubeConfigAccess: false, serverUrl: 'https://B211930B6A8D46DE0A16BD99BBB7F377.yl4.ap-south-1.eks.amazonaws.com') {
+                        sh """
+                          kubectl get pods -l version=${verifyEnv} -n ${KUBE_NAMESPACE}
+                          kubectl get svc app -n ${KUBE_NAMESPACE}
+                        """
+                    }
+                }
+            }
+        }
+    }
+}
