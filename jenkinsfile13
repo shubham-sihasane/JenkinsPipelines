@@ -44,6 +44,33 @@ pipeline {
                 }
             }
         }
+
+        // stage('SonarQube Analysis') {
+        //     steps {
+        //         withSonarQubeEnv('Sonarqube Server') {
+        //             script {
+        //                 def sonarScanner = tool name: 'SonarQube Scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
+        //                 sh "${sonarScanner}/bin/sonar-scanner " +
+        //                 "-Dsonar.projectKey=ProjectName-${GIT_BRANCH} " +
+        //                 "-Dsonar.projectName=ProjectName-${GIT_BRANCH} " +
+        //                 "-Dsonar.projectVersion=0.0.0 " +
+        //                 "-Dsonar.sources=**/src " +
+        //                 "-Dsonar.java.binaries=**/build " +
+        //                 "-Dsonar.exclusions=excluded_dirs/** " +
+        //                 "-Dsonar.sourceEncoding=UTF-8"
+        //             }
+        //         }
+        //         timeout(time: 5, unit: 'MINUTES') {
+        //             script {
+        //                 def qg = waitForQualityGate()
+        //                 if (qg.status != 'OK') {
+        //                     error "Pipeline aborted due to a quality gate failure: ${qg.status}"
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
+        
         stage('Package') {
             steps {
                 sh 'mvn package'
