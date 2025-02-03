@@ -16,6 +16,7 @@ pipeline {
         DOCKER_REGISTRY = "sihasaneshubham"
         DOCKER_IMAGE_NAME = "${DOCKER_REGISTRY}" + "/" + "${APP_NAME}"
         IMAGE_TAG = "${RELEASE}-${BUILD_NUMBER}"
+        JENKINS_API_TOKEN = credentials("JENKINS_API_TOKEN")
     }
 
     stages {
@@ -71,7 +72,13 @@ pipeline {
         }
         stage('Trivy Image Scan') {
             steps {
-                sh "trivy image  ${DOCKER_IMAGE_NAME}:latest --no-progress --scanners vuln  --exit-code 0 --severity HIGH,CRITICAL --format table"
+                script {
+                    withDockerRegistry(credentialsId: 'DockerHub-Credentials') {
+                        sh """
+                            trivy image  ${DOCKER_IMAGE_NAME}:latest --no-progress --scanners vuln  --exit-code 0 --severity HIGH,CRITICAL --format table
+                        """
+                    }
+                }
             }
         }
         stage('Clean Docker Artifact') {
@@ -82,7 +89,56 @@ pipeline {
                 """
             }
         }
+        stage('Trigger Release Pipeline'){
+            steps {
+                script {
+                    sh "curl -v -k --user shubhamsihasane:${JENKINS_API_TOKEN} -X POST -H 'cache-control: no-cache' -H 'content-type: application/x-www-form-urlencoded' --data 'IMAGE_TAG=${IMAGE_TAG}' 'http://68.183.80.165:8080/job/ReleasePipeline/buildWithParameters?token=gitops-token'"
+                }
+            }
+        }
 
     }
 
+}
+
+pipeline {
+    agent {
+        label 'Jenkins-Agent-1'
+    }
+
+    environment {
+        APP_NAME = "register-app"
+    }
+    stages {
+        stage('Clean Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+        stage('Git Checkout'){
+             git branch: 'main', credentialsId: 'GitHub-Credentials', url: 'https://github.com/shubham-sihasane/gitops-register-app.git'
+        }
+        stage('Update Deployment Tags'){
+            steps {
+                sh """
+                   cat deployment.yaml
+                   sed -i 's/${APP_NAME}.*/${APP_NAME}:${IMAGE_TAG}/g' deployment.yaml
+                   cat deployment.yaml
+                """
+            }
+        }
+        stage("Push the changed deployment file to Git") {
+            steps {
+                sh """
+                   git config --global user.name "Shubham Sihasane"
+                   git config --global user.email "shubhamsihasane101@gmail.com"
+                   git add deployment.yaml
+                   git commit -m "Updated Deployment Manifest"
+                """
+                withCredentials([gitUsernamePassword(credentialsId: 'GitHub-Credentials', gitToolName: 'Default')]) {
+                  sh "git push https://github.com/shubham-sihasane/gitops-register-app.git main"
+                }
+            }
+        }
+    }
 }
