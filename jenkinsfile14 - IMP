@@ -65,6 +65,7 @@ pipeline {
                         sh """
                             docker build -t ${DOCKER_IMAGE_NAME}:${IMAGE_TAG} .
                             docker push ${DOCKER_IMAGE_NAME}:${IMAGE_TAG}
+                            docker push ${DOCKER_IMAGE_NAME}:latest
                         """
                     }
                 }
@@ -98,6 +99,18 @@ pipeline {
         }
 
     }
+    post {
+       failure {
+             emailext body: '''${SCRIPT, template="groovy-html.template"}''', 
+                      subject: "${env.JOB_NAME} - Build # ${env.BUILD_NUMBER} - Failed", 
+                      mimeType: 'text/html',to: "shubhamsihasane101@gmail.com"
+      }
+      success {
+            emailext body: '''${SCRIPT, template="groovy-html.template"}''', 
+                     subject: "${env.JOB_NAME} - Build # ${env.BUILD_NUMBER} - Successful", 
+                     mimeType: 'text/html',to: "shubhamsihasane101@gmail.com"
+      }      
+   }
 
 }
 
@@ -109,6 +122,7 @@ pipeline {
     environment {
         APP_NAME = "register-app"
     }
+
     stages {
         stage('Clean Workspace') {
             steps {
@@ -116,7 +130,9 @@ pipeline {
             }
         }
         stage('Git Checkout'){
-             git branch: 'main', credentialsId: 'GitHub-Credentials', url: 'https://github.com/shubham-sihasane/gitops-register-app.git'
+             steps {
+                git branch: 'main', credentialsId: 'GitHub-Credentials', url: 'https://github.com/shubham-sihasane/gitops-register-app.git'
+             }
         }
         stage('Update Deployment Tags'){
             steps {
